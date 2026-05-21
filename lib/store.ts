@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { dbQuery, dbTransaction, hasDatabase } from "@/lib/db";
 import { seededSamples } from "@/lib/seed";
 import type {
   DailyUsage,
@@ -78,9 +79,29 @@ export async function parseIngestPayload(input: unknown): Promise<UsageSample[]>
 }
 
 export async function appendUsageSamples(samples: UsageSample[]) {
+  if (hasDatabase()) {
+    await appendUsageSamplesToDatabase(samples);
+    return;
+  }
+
   await mkdir(dataDir, { recursive: true });
   const merged = latestSamplesByUserProvider([...(await readStoredUsageSamples()), ...samples]);
   const lines = merged.map((sample) => JSON.stringify(sample)).join("\n");
+  await writeFile(usageFile, lines ? `${lines}\n` : "");
+}
+
+export async function deleteUsageSamplesForUser(userId: string) {
+  if (hasDatabase()) {
+    await dbTransaction(async (client) => {
+      await client.query("DELETE FROM daily_usage WHERE user_id = $1", [userId]);
+      await client.query("DELETE FROM usage_samples WHERE user_id = $1", [userId]);
+    });
+    return;
+  }
+
+  await mkdir(dataDir, { recursive: true });
+  const remaining = (await readStoredUsageSamples()).filter((sample) => sample.userId !== userId);
+  const lines = remaining.map((sample) => JSON.stringify(sample)).join("\n");
   await writeFile(usageFile, lines ? `${lines}\n` : "");
 }
 
@@ -101,7 +122,101 @@ export async function getLeaderboard(filters: LeaderboardFilters): Promise<Leade
 }
 
 async function readUsageSamples(): Promise<UsageSample[]> {
+  if (hasDatabase()) {
+    return readUsageSamplesFromDatabase();
+  }
+
   return latestSamplesByUserProvider(await readStoredUsageSamples());
+}
+
+async function appendUsageSamplesToDatabase(samples: UsageSample[]) {
+  await dbTransaction(async (client) => {
+    for (const sample of samples.map(withComputedTotals)) {
+      await client.query(
+        `INSERT INTO users (user_id, display_name, team, role, region, auth_provider, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'local', $6)
+         ON CONFLICT (user_id) DO UPDATE SET
+           display_name = EXCLUDED.display_name,
+           team = EXCLUDED.team,
+           role = EXCLUDED.role,
+           region = EXCLUDED.region,
+           updated_at = EXCLUDED.updated_at`,
+        [sample.userId, sample.displayName, sample.team, sample.role, sample.region, sample.updatedAt]
+      );
+
+      await client.query(
+        `INSERT INTO usage_samples (
+           user_id, provider, source, display_name, handle, team, role, region, totals, sample, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11)
+         ON CONFLICT (user_id, provider) DO UPDATE SET
+           source = EXCLUDED.source,
+           display_name = EXCLUDED.display_name,
+           handle = EXCLUDED.handle,
+           team = EXCLUDED.team,
+           role = EXCLUDED.role,
+           region = EXCLUDED.region,
+           totals = EXCLUDED.totals,
+           sample = EXCLUDED.sample,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          sample.userId,
+          sample.provider,
+          sample.source,
+          sample.displayName,
+          sample.handle ?? null,
+          sample.team,
+          sample.role,
+          sample.region,
+          JSON.stringify(sample.totals),
+          JSON.stringify(sample),
+          sample.updatedAt
+        ]
+      );
+
+      await client.query("DELETE FROM daily_usage WHERE user_id = $1 AND provider = $2", [
+        sample.userId,
+        sample.provider
+      ]);
+
+      for (const day of sample.daily) {
+        await client.query(
+          `INSERT INTO daily_usage (
+             user_id, provider, usage_date, source, input_tokens, output_tokens, cache_read_tokens,
+             cache_creation_tokens, total_tokens, total_cost, models, updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)`,
+          [
+            sample.userId,
+            day.provider,
+            day.date.slice(0, 10),
+            sample.source,
+            day.inputTokens,
+            day.outputTokens,
+            day.cacheReadTokens,
+            day.cacheCreationTokens,
+            day.totalTokens,
+            day.totalCost,
+            JSON.stringify(day.models),
+            sample.updatedAt
+          ]
+        );
+      }
+    }
+  });
+}
+
+async function readUsageSamplesFromDatabase(): Promise<UsageSample[]> {
+  const result = await dbQuery<{ sample: UsageSample }>("SELECT sample FROM usage_samples ORDER BY updated_at DESC");
+  return latestSamplesByUserProvider(
+    result.rows.flatMap((row) => {
+      try {
+        return [withComputedTotals(usageSampleSchema.parse(row.sample))];
+      } catch {
+        return [];
+      }
+    })
+  );
 }
 
 async function readStoredUsageSamples(): Promise<UsageSample[]> {

@@ -68,7 +68,10 @@ const providers: { label: string; value: ProviderKey }[] = [
 
 type AuthSnapshot = {
   authenticated: boolean;
+  database: boolean;
   githubOAuth: boolean;
+  localLogin: boolean;
+  localSubmit: boolean;
   session: UserSession | null;
   connections: ProviderConnection[];
 };
@@ -92,7 +95,10 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
   const [connectTab, setConnectTab] = useState<ConnectTab>("openai");
   const [auth, setAuth] = useState<AuthSnapshot>({
     authenticated: false,
+    database: false,
     githubOAuth: false,
+    localLogin: true,
+    localSubmit: true,
     session: null,
     connections: []
   });
@@ -208,6 +214,23 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
     await loadSession();
   }
 
+  async function deleteMyData() {
+    setConnectionState("submitting");
+    setConnectionMessage("");
+    try {
+      const response = await fetch("/api/users/me/delete", { method: "POST" });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Delete failed");
+      await loadSession();
+      setConnectionState("success");
+      setConnectionMessage("Deleted your submitted data");
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setConnectionState("error");
+      setConnectionMessage(error instanceof Error ? error.message : "Delete failed");
+    }
+  }
+
   async function syncOpenAi() {
     await syncProvider("/api/providers/openai/sync", {
       apiKey: openAiForm.apiKey,
@@ -298,7 +321,7 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
             className="submit-button"
             type="button"
             onClick={submitLocalUsage}
-            disabled={submitState === "submitting"}
+            disabled={submitState === "submitting" || !auth.localSubmit}
           >
             <UploadCloud size={16} aria-hidden="true" />
             {submitState === "submitting" ? "Submitting" : "Submit usage"}
@@ -346,6 +369,7 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
           onSubmitManual={submitManualUsage}
           onSyncOpenAi={syncOpenAi}
           onSyncXai={syncXai}
+          onDeleteData={deleteMyData}
           onLoginFormChange={setLoginForm}
           onXAiFormChange={setXAiForm}
         />
@@ -524,6 +548,7 @@ function ConnectDialog({
   loginForm,
   manualForm,
   onClose,
+  onDeleteData,
   onLogin,
   onLoginFormChange,
   onManualFormChange,
@@ -552,6 +577,7 @@ function ConnectDialog({
   openAiForm: { apiKey: string; days: string };
   xAiForm: { managementKey: string; teamId: string; days: string };
   onClose: () => void;
+  onDeleteData: () => void;
   onLogin: () => void;
   onLoginFormChange: (value: { displayName: string; team: string; role: string; region: string }) => void;
   onManualFormChange: (value: {
@@ -584,7 +610,7 @@ function ConnectDialog({
           </button>
         </div>
 
-        {!auth.session ? (
+        {!auth.session && auth.localLogin ? (
           <div className="login-grid">
             <label className="stacked-field">
               <span>Name</span>
@@ -625,6 +651,14 @@ function ConnectDialog({
                 GitHub
               </a>
             </div>
+          </div>
+        ) : !auth.session ? (
+          <div className="github-only-panel">
+            <a className={auth.githubOAuth ? "submit-button" : "submit-button disabled"} href="/api/auth/github/start">
+              <Github size={16} aria-hidden="true" />
+              Continue with GitHub
+            </a>
+            {!auth.githubOAuth ? <span>GitHub OAuth is not configured yet.</span> : null}
           </div>
         ) : (
           <>
@@ -779,6 +813,12 @@ function ConnectDialog({
                   {providerLabels[connection.provider]} · {connection.authMethod}
                 </span>
               ))}
+            </div>
+            <div className="danger-zone">
+              <a href="/privacy">Privacy</a>
+              <button className="danger-button" type="button" onClick={onDeleteData} disabled={busy}>
+                Delete my data
+              </button>
             </div>
           </>
         )}

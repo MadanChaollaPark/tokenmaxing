@@ -3,6 +3,8 @@ import { z, ZodError } from "zod";
 import { getSessionFromRequest } from "@/lib/auth";
 import { connectionId, upsertProviderConnection } from "@/lib/provider-connections";
 import { fetchXaiUsageSample } from "@/lib/providers/xai";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { PayloadTooLargeError, readJsonBody } from "@/lib/request";
 import { appendUsageSamples } from "@/lib/store";
 
 const syncSchema = z.object({
@@ -19,8 +21,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "sign in required" }, { status: 401 });
   }
 
+  const rate = checkRateLimit(request, `xai-sync:${session.userId}`, { limit: 8, windowMs: 60_000 });
+  if (!rate.ok) {
+    return NextResponse.json({ error: "rate limited", retryAfter: rate.retryAfter }, { status: 429 });
+  }
+
   try {
-    const body = syncSchema.parse(await request.json());
+    const body = syncSchema.parse(await readJsonBody(request, 16 * 1024));
     const sample = await fetchXaiUsageSample({
       managementKey: body.managementKey,
       teamId: body.teamId,
@@ -54,6 +61,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json({ error: "invalid xAI sync request", issues: error.issues }, { status: 400 });
+    }
+    if (error instanceof PayloadTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
     }
     const message = error instanceof Error ? error.message : "xAI sync failed";
     await upsertProviderConnection({

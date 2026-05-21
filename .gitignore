@@ -4,6 +4,7 @@ out
 dist
 .env
 .env.local
+.vercel
 .DS_Store
 .tmp
 test-results

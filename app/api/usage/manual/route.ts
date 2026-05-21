@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import { getSessionFromRequest } from "@/lib/auth";
 import { connectionId, upsertProviderConnection } from "@/lib/provider-connections";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { PayloadTooLargeError, readJsonBody } from "@/lib/request";
 import { appendUsageSamples } from "@/lib/store";
 import { usageProviders } from "@/lib/types";
 import type { UsageSample } from "@/lib/types";
@@ -25,8 +27,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "sign in required" }, { status: 401 });
   }
 
+  const rate = checkRateLimit(request, `usage-manual:${session.userId}`, { limit: 20, windowMs: 60_000 });
+  if (!rate.ok) {
+    return NextResponse.json({ error: "rate limited", retryAfter: rate.retryAfter }, { status: 429 });
+  }
+
   try {
-    const body = manualSchema.parse(await request.json());
+    const body = manualSchema.parse(await readJsonBody(request, 16 * 1024));
     const date = (body.date || new Date().toISOString()).slice(0, 10);
     const totalTokens = body.inputTokens + body.outputTokens;
     if (!totalTokens) {
@@ -92,6 +99,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json({ error: "invalid manual submit", issues: error.issues }, { status: 400 });
+    }
+    if (error instanceof PayloadTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
     }
     return NextResponse.json({ error: "manual submit failed" }, { status: 400 });
   }

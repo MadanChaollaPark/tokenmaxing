@@ -206,7 +206,8 @@ h3 {
   border-color: #111827;
 }
 
-.repo-button.disabled {
+.repo-button.disabled,
+.submit-button.disabled {
   pointer-events: none;
   opacity: 0.45;
 }
@@ -296,6 +297,21 @@ h3 {
   gap: 12px;
 }
 
+.github-only-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.github-only-panel .submit-button {
+  justify-content: center;
+}
+
+.github-only-panel span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 .dialog-actions {
   grid-column: 1 / -1;
   gap: 10px;
@@ -380,6 +396,36 @@ h3 {
 .connection-list {
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.danger-zone a {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.danger-button {
+  min-height: 34px;
+  padding: 0 11px;
+  color: var(--rose);
+  background: #fff1f2;
+  border: 1px solid rgba(190, 18, 60, 0.18);
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .connection-chip {
@@ -795,6 +841,28 @@ h3 {
   color: var(--muted);
 }
 
+.policy-page {
+  width: min(720px, calc(100vw - 32px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.policy-page section {
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.policy-page p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }
@@ -847,7 +915,8 @@ h3 {
 
   .connection-tabs,
   .provider-form,
-  .dialog-actions {
+  .dialog-actions,
+  .danger-zone {
     align-items: stretch;
     flex-direction: column;
   }

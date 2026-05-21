@@ -13,6 +13,12 @@ npm run dev
 
 Open `http://127.0.0.1:3000`.
 
+## Storage
+
+Local development works without setup and stores submissions in `data/*.jsonl`.
+
+Production should set `DATABASE_URL`. When that is present, TokenMaxing uses Postgres and creates the small schema from [db/schema.sql](db/schema.sql) automatically.
+
 ## Ingest CodexBar Usage
 
 Use **Submit usage** in the app header when running locally, or run the collector manually.
@@ -38,15 +44,17 @@ If `TOKENMAXING_INGEST_TOKEN` is set on the server, the collector sends it as a 
 ## API
 
 - `GET /api/leaderboard?window=today|7d|30d|all&provider=all|codex|openai|xai|claude|other&team=all&query=`
+- `GET /api/health`
 - `POST /api/usage/ingest`
 - `POST /api/usage/manual`
 - `POST /api/providers/openai/sync`
 - `POST /api/providers/xai/sync`
 - `GET /api/auth/session`
 - `POST /api/auth/login`
+- `POST /api/users/me/delete`
 - `GET /api/users/me`
 
-Local ingests are stored in `data/usage-samples.jsonl`. Repeated submissions replace the latest snapshot for that user/provider so refreshes do not double-count. The app also includes seeded demo rows so the leaderboard is usable before the first real collector sync.
+Repeated submissions replace the latest snapshot for that user/provider so refreshes do not double-count. The app also includes seeded demo rows so the leaderboard is usable before the first real collector sync.
 
 ## Sign In And Provider Sync
 
@@ -70,4 +78,4 @@ GITHUB_CLIENT_SECRET=...
 
 ## Production
 
-See [docs/PRODUCTION.md](docs/PRODUCTION.md) for the production-readiness checklist.
+Use Vercel for the hobby deploy. See [docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md) and [docs/PRODUCTION.md](docs/PRODUCTION.md).

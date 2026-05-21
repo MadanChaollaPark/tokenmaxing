@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSession, oauthStateCookieName, sessionCookieName, sessionCookieOptions, signSession } from "@/lib/auth";
+import { upsertUserFromSession } from "@/lib/users";
 
 interface GitHubTokenResponse {
   access_token?: string;
@@ -69,6 +70,7 @@ export async function GET(request: NextRequest) {
     avatarUrl: profile.avatar_url,
     authProvider: "github"
   });
+  await upsertUserFromSession(session);
 
   const response = NextResponse.redirect(new URL("/", request.url));
   response.cookies.set(sessionCookieName, signSession(session), sessionCookieOptions());

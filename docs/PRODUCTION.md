@@ -1,69 +1,29 @@
-# Production Readiness
+# Hobby Production Checklist
 
-TokenMaxing is currently a local-first MVP. This checklist is what needs to change before running it as a public service.
+TokenMaxing is now set up for a small public hobby deploy.
 
-## Data Model
+## Required
 
-- Replace `data/usage-samples.jsonl` with Postgres.
-- Upsert usage by `(user_id, provider, source_snapshot_id)` or by `(user_id, provider)` for latest snapshots.
-- Store daily rollups separately from raw submitted snapshots.
-- Add migrations with Prisma, Drizzle, or plain SQL.
+- Set `DATABASE_URL` so usage and provider connections are stored in Postgres.
+- Set `TOKENMAXING_SESSION_SECRET` to a long random value.
+- Configure GitHub OAuth with callback `/api/auth/github/callback`.
+- Keep `TOKENMAXING_ALLOW_LOCAL_LOGIN=false` in production.
+- Keep `TOKENMAXING_ALLOW_LOCAL_SUBMIT=false` in production.
+- Use the Connect modal for OpenAI, xAI, CodexBar collector, or manual usage.
 
-## Auth
+## Already In The App
 
-- Replace file-backed signed sessions with database-backed users.
-- Keep GitHub OAuth enabled through `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, or add magic links.
-- Set a strong `TOKENMAXING_SESSION_SECRET`.
-- Issue each user a collector token.
-- Require bearer tokens for `/api/usage/ingest`.
-- Scope users to organizations or teams.
-- Add private/public profile controls.
+- Postgres storage with local JSONL fallback for development.
+- Basic in-memory rate limits for login, ingest, manual submit, and provider sync.
+- Request payload size limits.
+- Production guard that disables browser-triggered local CodexBar shell execution.
+- User data deletion endpoint and button.
+- Privacy page describing stored data.
+- `/api/health` for uptime checks.
 
-## Ingestion
+## Still Later
 
-- Keep `/api/usage/submit-local` for local development only.
-- For hosted production, users cannot run `codexbar` from the website. They need a local collector or desktop helper.
-- Keep OpenAI Admin API key sync as a one-time request path unless you add encrypted secret storage.
-- Treat xAI Management sync as a provider adapter over invoice token line items and keep manual submit available while token metrics vary by account/API response.
-- Build a signed collector install command that posts to `/api/usage/ingest`.
-- Validate payload size, dates, providers, and impossible jumps.
-- Rate-limit submissions per user.
-
-## Privacy
-
-- Make the ingestion contract explicit: aggregate tokens, cost estimates, provider/model/day only.
-- Never upload prompts, file paths, session logs, cookies, API keys, or local usernames without explicit opt-in.
-- Add terms, privacy policy, and a data deletion/export flow.
-- Add an audit view showing exactly what a collector will submit.
-
-## Security
-
-- Disable or protect local shell execution in deployed environments.
-- Do not persist provider API keys without envelope encryption and rotation.
-- Add CSRF protection for browser-authenticated mutation routes.
-- Add rate limiting and abuse detection for public APIs.
-- Set security headers.
-- Keep CORS closed unless there is a specific collector need.
-- Store secrets only in environment variables or a secrets manager.
-
-## Product
-
-- Separate raw token ranking from estimated spend ranking.
-- Keep provider-specific boards because token units are not comparable across providers.
-- Add org/team leaderboards, invite links, and opt-in profile visibility.
-- Add badge definitions and anti-gaming notes in the UI.
-- Add a "last submitted" state for each user.
-
-## Operations
-
-- Deploy on Vercel, Fly.io, or Render with managed Postgres.
-- Add CI for `npm run build`, `npm run lint`, and `npm audit`.
-- Add structured logs and request IDs.
-- Add uptime checks for `/api/leaderboard`.
-- Add backup/restore for the database.
-
-## Domain
-
-- Point `tokenmaxing.xyz` to the deployment.
-- Set `NEXT_PUBLIC_REPO_URL=https://github.com/MadanChaollaPark/tokenmaxing`.
-- Add social preview metadata and a favicon.
+- Replace in-memory rate limits with Upstash or another shared limiter if traffic grows.
+- Add a proper email/support flow for data deletion requests.
+- Add org/team invites.
+- Add an admin moderation panel for obviously fake submissions.
