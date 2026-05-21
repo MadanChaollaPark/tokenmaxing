@@ -9,15 +9,17 @@ import type {
   LeaderboardRow,
   ModelUsage,
   ProviderKey,
+  ProviderSplit,
   UsageProvider,
   UsageSample,
   WindowKey
 } from "@/lib/types";
+import { usageProviders } from "@/lib/types";
 
 const dataDir = path.join(process.cwd(), "data");
 const usageFile = path.join(dataDir, "usage-samples.jsonl");
 
-const providerSchema = z.enum(["codex", "claude", "other"]);
+const providerSchema = z.enum(usageProviders);
 
 const modelUsageSchema = z.object({
   provider: providerSchema.default("other"),
@@ -217,7 +219,7 @@ function aggregateUser(samples: UsageSample[], cutoff: Date | null, now: Date): 
   let outputTokens = 0;
   let cacheTokens = 0;
   let delta24h = 0;
-  const providers = { codex: 0, claude: 0, other: 0 };
+  const providers = emptyProviderSplit();
   let lastSyncAt = identity.updatedAt;
 
   for (const sample of samples) {
@@ -281,14 +283,12 @@ function aggregateUser(samples: UsageSample[], cutoff: Date | null, now: Date): 
 function summarize(rows: LeaderboardRow[]) {
   const totalTokens = rows.reduce((sum, row) => sum + row.tokens, 0);
   const estimatedCost = rows.reduce((sum, row) => sum + row.estimatedCost, 0);
-  const providerTotals = rows.reduce(
-    (acc, row) => ({
-      codex: acc.codex + row.providers.codex,
-      claude: acc.claude + row.providers.claude,
-      other: acc.other + row.providers.other
-    }),
-    { codex: 0, claude: 0, other: 0 }
-  );
+  const providerTotals = rows.reduce((acc, row) => {
+    for (const provider of usageProviders) {
+      acc[provider] += row.providers[provider];
+    }
+    return acc;
+  }, emptyProviderSplit());
   const lastSyncAt = rows
     .map((row) => row.lastSyncAt)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
@@ -376,5 +376,15 @@ function isWindowKey(value: string): value is WindowKey {
 }
 
 function isProviderKey(value: string): value is ProviderKey {
-  return ["all", "codex", "claude"].includes(value);
+  return value === "all" || usageProviders.includes(value as UsageProvider);
+}
+
+function emptyProviderSplit(): ProviderSplit {
+  return {
+    codex: 0,
+    openai: 0,
+    xai: 0,
+    claude: 0,
+    other: 0
+  };
 }

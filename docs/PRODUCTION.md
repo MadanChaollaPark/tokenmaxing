@@ -11,7 +11,9 @@ TokenMaxing is currently a local-first MVP. This checklist is what needs to chan
 
 ## Auth
 
-- Add GitHub OAuth or magic links.
+- Replace file-backed signed sessions with database-backed users.
+- Keep GitHub OAuth enabled through `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, or add magic links.
+- Set a strong `TOKENMAXING_SESSION_SECRET`.
 - Issue each user a collector token.
 - Require bearer tokens for `/api/usage/ingest`.
 - Scope users to organizations or teams.
@@ -21,6 +23,8 @@ TokenMaxing is currently a local-first MVP. This checklist is what needs to chan
 
 - Keep `/api/usage/submit-local` for local development only.
 - For hosted production, users cannot run `codexbar` from the website. They need a local collector or desktop helper.
+- Keep OpenAI Admin API key sync as a one-time request path unless you add encrypted secret storage.
+- Treat xAI Management sync as a provider adapter over invoice token line items and keep manual submit available while token metrics vary by account/API response.
 - Build a signed collector install command that posts to `/api/usage/ingest`.
 - Validate payload size, dates, providers, and impossible jumps.
 - Rate-limit submissions per user.
@@ -35,6 +39,7 @@ TokenMaxing is currently a local-first MVP. This checklist is what needs to chan
 ## Security
 
 - Disable or protect local shell execution in deployed environments.
+- Do not persist provider API keys without envelope encryption and rotation.
 - Add CSRF protection for browser-authenticated mutation routes.
 - Add rate limiting and abuse detection for public APIs.
 - Set security headers.

@@ -1,5 +1,7 @@
-export type ProviderKey = "all" | "codex" | "claude";
-export type UsageProvider = "codex" | "claude" | "other";
+export const usageProviders = ["codex", "openai", "xai", "claude", "other"] as const;
+
+export type UsageProvider = (typeof usageProviders)[number];
+export type ProviderKey = "all" | UsageProvider;
 export type WindowKey = "today" | "7d" | "30d" | "all";
 
 export interface UsageTotals {
@@ -53,6 +55,8 @@ export interface LeaderboardFilters {
 
 export interface ProviderSplit {
   codex: number;
+  openai: number;
+  xai: number;
   claude: number;
   other: number;
 }
@@ -94,4 +98,29 @@ export interface LeaderboardResponse {
   rows: LeaderboardRow[];
   teams: string[];
   generatedAt: string;
+}
+
+export interface UserSession {
+  userId: string;
+  displayName: string;
+  team: string;
+  role: string;
+  region: string;
+  avatarUrl?: string;
+  authProvider: "local" | "github";
+  expiresAt: string;
+}
+
+export interface ProviderConnection {
+  id: string;
+  userId: string;
+  provider: UsageProvider;
+  authMethod: "api_key" | "codexbar" | "manual" | "oauth";
+  label: string;
+  status: "connected" | "error";
+  createdAt: string;
+  updatedAt: string;
+  lastSyncAt?: string;
+  lastError?: string;
+  meta?: Record<string, string | number | boolean>;
 }

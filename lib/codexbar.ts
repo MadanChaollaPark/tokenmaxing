@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { promisify } from "node:util";
-import type { UsageProvider, UsageSample } from "@/lib/types";
+import type { UsageProvider, UsageSample, UserSession } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,9 +42,9 @@ interface SubmitIdentity {
   userId: string;
 }
 
-export async function loadCodexBarSamples() {
+export async function loadCodexBarSamples(session?: UserSession | null) {
   const codexbarBin = process.env.CODEXBAR_BIN || "codexbar";
-  const identity = localSubmitIdentity();
+  const identity = session ? sessionIdentity(session) : localSubmitIdentity();
   const { stdout } = await execFileAsync(
     codexbarBin,
     ["cost", "--provider", "both", "--format", "json"],
@@ -52,6 +52,16 @@ export async function loadCodexBarSamples() {
   );
   const payload = JSON.parse(stdout) as CodexBarCostEntry[];
   return codexbarCostEntriesToSamples(payload, identity);
+}
+
+function sessionIdentity(session: UserSession): SubmitIdentity {
+  return {
+    userId: session.userId,
+    displayName: session.displayName,
+    team: session.team,
+    role: session.role,
+    region: session.region
+  };
 }
 
 export function codexbarCostEntriesToSamples(

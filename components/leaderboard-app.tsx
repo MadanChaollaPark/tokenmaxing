@@ -7,6 +7,11 @@ import {
   Filter,
   Gauge,
   Github,
+  KeyRound,
+  Link2,
+  LogIn,
+  LogOut,
+  PlugZap,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -14,10 +19,20 @@ import {
   Trophy,
   UploadCloud,
   Users,
+  X,
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { LeaderboardResponse, LeaderboardRow, ProviderKey, WindowKey } from "@/lib/types";
+import { usageProviders } from "@/lib/types";
+import type {
+  LeaderboardResponse,
+  LeaderboardRow,
+  ProviderConnection,
+  ProviderKey,
+  UsageProvider,
+  UserSession,
+  WindowKey
+} from "@/lib/types";
 
 interface LeaderboardAppProps {
   initialData: LeaderboardResponse;
@@ -30,11 +45,35 @@ const windows: { label: string; value: WindowKey }[] = [
   { label: "All", value: "all" }
 ];
 
+const providerLabels: Record<UsageProvider, string> = {
+  codex: "Codex",
+  openai: "OpenAI",
+  xai: "xAI",
+  claude: "Claude",
+  other: "Other"
+};
+
+const providerColors: Record<UsageProvider, string> = {
+  codex: "#0f766e",
+  openai: "#111827",
+  xai: "#4f46e5",
+  claude: "#b45309",
+  other: "#64748b"
+};
+
 const providers: { label: string; value: ProviderKey }[] = [
   { label: "All", value: "all" },
-  { label: "Codex", value: "codex" },
-  { label: "Claude", value: "claude" }
+  ...usageProviders.map((value) => ({ label: providerLabels[value], value }))
 ];
+
+type AuthSnapshot = {
+  authenticated: boolean;
+  githubOAuth: boolean;
+  session: UserSession | null;
+  connections: ProviderConnection[];
+};
+
+type ConnectTab = "codexbar" | "openai" | "xai" | "manual";
 
 const repoUrl = process.env.NEXT_PUBLIC_REPO_URL || "https://github.com/MadanChaollaPark/tokenmaxing";
 
@@ -49,6 +88,31 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [submitMessage, setSubmitMessage] = useState("");
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectTab, setConnectTab] = useState<ConnectTab>("openai");
+  const [auth, setAuth] = useState<AuthSnapshot>({
+    authenticated: false,
+    githubOAuth: false,
+    session: null,
+    connections: []
+  });
+  const [loginForm, setLoginForm] = useState({
+    displayName: "",
+    team: "Unassigned",
+    role: "Builder",
+    region: "Remote"
+  });
+  const [openAiForm, setOpenAiForm] = useState({ apiKey: "", days: "30" });
+  const [xAiForm, setXAiForm] = useState({ managementKey: "", teamId: "", days: "30" });
+  const [manualForm, setManualForm] = useState({
+    provider: "openai" as UsageProvider,
+    modelName: "manual",
+    inputTokens: "",
+    outputTokens: "",
+    totalCost: ""
+  });
+  const [connectionState, setConnectionState] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [connectionMessage, setConnectionMessage] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams({
@@ -76,6 +140,10 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
     return () => controller.abort();
   }, [provider, query, refreshNonce, selectedUserId, team, windowKey]);
 
+  useEffect(() => {
+    loadSession();
+  }, []);
+
   const selected = useMemo(
     () => data.rows.find((row) => row.userId === selectedUserId) ?? data.rows[0],
     [data.rows, selectedUserId]
@@ -102,6 +170,102 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
     }
   }
 
+  async function loadSession() {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    const payload = (await response.json()) as AuthSnapshot;
+    setAuth(payload);
+    if (payload.session) {
+      setLoginForm({
+        displayName: payload.session.displayName,
+        team: payload.session.team,
+        role: payload.session.role,
+        region: payload.session.region
+      });
+    }
+  }
+
+  async function loginLocal() {
+    setConnectionState("submitting");
+    setConnectionMessage("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginForm)
+      });
+      if (!response.ok) throw new Error("Login failed");
+      await loadSession();
+      setConnectionState("success");
+      setConnectionMessage("Signed in");
+    } catch (error) {
+      setConnectionState("error");
+      setConnectionMessage(error instanceof Error ? error.message : "Login failed");
+    }
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    await loadSession();
+  }
+
+  async function syncOpenAi() {
+    await syncProvider("/api/providers/openai/sync", {
+      apiKey: openAiForm.apiKey,
+      days: Number(openAiForm.days || 30)
+    });
+    setOpenAiForm((value) => ({ ...value, apiKey: "" }));
+  }
+
+  async function syncXai() {
+    await syncProvider("/api/providers/xai/sync", {
+      managementKey: xAiForm.managementKey,
+      teamId: xAiForm.teamId,
+      days: Number(xAiForm.days || 30)
+    });
+    setXAiForm((value) => ({ ...value, managementKey: "" }));
+  }
+
+  async function submitManualUsage() {
+    await syncProvider("/api/usage/manual", {
+      provider: manualForm.provider,
+      modelName: manualForm.modelName,
+      inputTokens: Number(manualForm.inputTokens || 0),
+      outputTokens: Number(manualForm.outputTokens || 0),
+      totalCost: Number(manualForm.totalCost || 0)
+    });
+    setManualForm((value) => ({ ...value, inputTokens: "", outputTokens: "", totalCost: "" }));
+  }
+
+  async function submitCodexBarFromDialog() {
+    await syncProvider("/api/usage/submit-local", {});
+  }
+
+  async function syncProvider(endpoint: string, body: Record<string, unknown>) {
+    setConnectionState("submitting");
+    setConnectionMessage("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        tokens?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Sync failed");
+      }
+      setConnectionState("success");
+      setConnectionMessage(payload.tokens ? `Synced ${formatTokens(payload.tokens)} tokens` : "Synced");
+      await loadSession();
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setConnectionState("error");
+      setConnectionMessage(error instanceof Error ? error.message : "Sync failed");
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -119,6 +283,17 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
             <ShieldCheck size={15} aria-hidden="true" />
             Local aggregates
           </span>
+          {auth.session ? (
+            <button className="user-pill" type="button" onClick={logout}>
+              <LogOut size={15} aria-hidden="true" />
+              {auth.session.displayName}
+            </button>
+          ) : (
+            <button className="repo-button" type="button" onClick={() => setConnectOpen(true)}>
+              <LogIn size={16} aria-hidden="true" />
+              Login
+            </button>
+          )}
           <button
             className="submit-button"
             type="button"
@@ -127,6 +302,10 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
           >
             <UploadCloud size={16} aria-hidden="true" />
             {submitState === "submitting" ? "Submitting" : "Submit usage"}
+          </button>
+          <button className="connect-button" type="button" onClick={() => setConnectOpen(true)}>
+            <PlugZap size={16} aria-hidden="true" />
+            Connect
           </button>
           <a className="repo-button" href={repoUrl} target="_blank" rel="noreferrer">
             <Github size={16} aria-hidden="true" />
@@ -147,6 +326,30 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
           ) : null}
         </div>
       </header>
+
+      {connectOpen ? (
+        <ConnectDialog
+          auth={auth}
+          connectTab={connectTab}
+          connectionMessage={connectionMessage}
+          connectionState={connectionState}
+          loginForm={loginForm}
+          manualForm={manualForm}
+          openAiForm={openAiForm}
+          xAiForm={xAiForm}
+          onClose={() => setConnectOpen(false)}
+          onLogin={loginLocal}
+          onManualFormChange={setManualForm}
+          onOpenAiFormChange={setOpenAiForm}
+          onSetConnectTab={setConnectTab}
+          onSubmitCodexBar={submitCodexBarFromDialog}
+          onSubmitManual={submitManualUsage}
+          onSyncOpenAi={syncOpenAi}
+          onSyncXai={syncXai}
+          onLoginFormChange={setLoginForm}
+          onXAiFormChange={setXAiForm}
+        />
+      ) : null}
 
       <section className="toolbar" aria-label="Leaderboard filters">
         <SegmentedControl
@@ -313,6 +516,283 @@ export function LeaderboardApp({ initialData }: LeaderboardAppProps) {
   );
 }
 
+function ConnectDialog({
+  auth,
+  connectTab,
+  connectionMessage,
+  connectionState,
+  loginForm,
+  manualForm,
+  onClose,
+  onLogin,
+  onLoginFormChange,
+  onManualFormChange,
+  onOpenAiFormChange,
+  onSetConnectTab,
+  onSubmitCodexBar,
+  onSubmitManual,
+  onSyncOpenAi,
+  onSyncXai,
+  onXAiFormChange,
+  openAiForm,
+  xAiForm
+}: {
+  auth: AuthSnapshot;
+  connectTab: ConnectTab;
+  connectionMessage: string;
+  connectionState: "idle" | "submitting" | "success" | "error";
+  loginForm: { displayName: string; team: string; role: string; region: string };
+  manualForm: {
+    provider: UsageProvider;
+    modelName: string;
+    inputTokens: string;
+    outputTokens: string;
+    totalCost: string;
+  };
+  openAiForm: { apiKey: string; days: string };
+  xAiForm: { managementKey: string; teamId: string; days: string };
+  onClose: () => void;
+  onLogin: () => void;
+  onLoginFormChange: (value: { displayName: string; team: string; role: string; region: string }) => void;
+  onManualFormChange: (value: {
+    provider: UsageProvider;
+    modelName: string;
+    inputTokens: string;
+    outputTokens: string;
+    totalCost: string;
+  }) => void;
+  onOpenAiFormChange: (value: { apiKey: string; days: string }) => void;
+  onSetConnectTab: (value: ConnectTab) => void;
+  onSubmitCodexBar: () => void;
+  onSubmitManual: () => void;
+  onSyncOpenAi: () => void;
+  onSyncXai: () => void;
+  onXAiFormChange: (value: { managementKey: string; teamId: string; days: string }) => void;
+}) {
+  const busy = connectionState === "submitting";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="connect-dialog" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+        <div className="dialog-heading">
+          <div>
+            <h2 id="connect-title">Connect Usage</h2>
+            <p>{auth.session ? auth.session.displayName : "Sign in to publish provider usage"}</p>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close" onClick={onClose}>
+            <X size={17} aria-hidden="true" />
+          </button>
+        </div>
+
+        {!auth.session ? (
+          <div className="login-grid">
+            <label className="stacked-field">
+              <span>Name</span>
+              <input
+                value={loginForm.displayName}
+                onChange={(event) => onLoginFormChange({ ...loginForm, displayName: event.target.value })}
+                placeholder="Madan"
+              />
+            </label>
+            <label className="stacked-field">
+              <span>Team</span>
+              <input
+                value={loginForm.team}
+                onChange={(event) => onLoginFormChange({ ...loginForm, team: event.target.value })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>Role</span>
+              <input
+                value={loginForm.role}
+                onChange={(event) => onLoginFormChange({ ...loginForm, role: event.target.value })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>Region</span>
+              <input
+                value={loginForm.region}
+                onChange={(event) => onLoginFormChange({ ...loginForm, region: event.target.value })}
+              />
+            </label>
+            <div className="dialog-actions">
+              <button className="submit-button" type="button" onClick={onLogin} disabled={busy || !loginForm.displayName}>
+                <LogIn size={16} aria-hidden="true" />
+                Continue
+              </button>
+              <a className={auth.githubOAuth ? "repo-button" : "repo-button disabled"} href="/api/auth/github/start">
+                <Github size={16} aria-hidden="true" />
+                GitHub
+              </a>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="connection-tabs" role="tablist" aria-label="Usage source">
+              {[
+                ["openai", "OpenAI"],
+                ["xai", "xAI"],
+                ["codexbar", "CodexBar"],
+                ["manual", "Manual"]
+              ].map(([value, label]) => (
+                <button
+                  className={connectTab === value ? "active" : ""}
+                  key={value}
+                  type="button"
+                  onClick={() => onSetConnectTab(value as ConnectTab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {connectTab === "openai" ? (
+              <div className="provider-form">
+                <label className="stacked-field">
+                  <span>Admin API key</span>
+                  <input
+                    type="password"
+                    value={openAiForm.apiKey}
+                    onChange={(event) => onOpenAiFormChange({ ...openAiForm, apiKey: event.target.value })}
+                    placeholder="sk-..."
+                  />
+                </label>
+                <label className="stacked-field short">
+                  <span>Days</span>
+                  <input
+                    inputMode="numeric"
+                    value={openAiForm.days}
+                    onChange={(event) => onOpenAiFormChange({ ...openAiForm, days: event.target.value })}
+                  />
+                </label>
+                <button className="submit-button" type="button" onClick={onSyncOpenAi} disabled={busy || !openAiForm.apiKey}>
+                  <KeyRound size={16} aria-hidden="true" />
+                  Sync OpenAI
+                </button>
+              </div>
+            ) : null}
+
+            {connectTab === "xai" ? (
+              <div className="provider-form">
+                <label className="stacked-field">
+                  <span>Management key</span>
+                  <input
+                    type="password"
+                    value={xAiForm.managementKey}
+                    onChange={(event) => onXAiFormChange({ ...xAiForm, managementKey: event.target.value })}
+                  />
+                </label>
+                <label className="stacked-field">
+                  <span>Team ID</span>
+                  <input
+                    value={xAiForm.teamId}
+                    onChange={(event) => onXAiFormChange({ ...xAiForm, teamId: event.target.value })}
+                  />
+                </label>
+                <label className="stacked-field short">
+                  <span>Days</span>
+                  <input
+                    inputMode="numeric"
+                    value={xAiForm.days}
+                    onChange={(event) => onXAiFormChange({ ...xAiForm, days: event.target.value })}
+                  />
+                </label>
+                <button
+                  className="submit-button"
+                  type="button"
+                  onClick={onSyncXai}
+                  disabled={busy || !xAiForm.managementKey || !xAiForm.teamId}
+                >
+                  <KeyRound size={16} aria-hidden="true" />
+                  Sync xAI
+                </button>
+              </div>
+            ) : null}
+
+            {connectTab === "codexbar" ? (
+              <div className="provider-form single">
+                <button className="submit-button" type="button" onClick={onSubmitCodexBar} disabled={busy}>
+                  <UploadCloud size={16} aria-hidden="true" />
+                  Submit CodexBar
+                </button>
+              </div>
+            ) : null}
+
+            {connectTab === "manual" ? (
+              <div className="provider-form manual-grid">
+                <label className="stacked-field">
+                  <span>Provider</span>
+                  <select
+                    value={manualForm.provider}
+                    onChange={(event) =>
+                      onManualFormChange({ ...manualForm, provider: event.target.value as UsageProvider })
+                    }
+                  >
+                    {usageProviders.map((item) => (
+                      <option key={item} value={item}>
+                        {providerLabels[item]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="stacked-field">
+                  <span>Model</span>
+                  <input
+                    value={manualForm.modelName}
+                    onChange={(event) => onManualFormChange({ ...manualForm, modelName: event.target.value })}
+                  />
+                </label>
+                <label className="stacked-field">
+                  <span>Input tokens</span>
+                  <input
+                    inputMode="numeric"
+                    value={manualForm.inputTokens}
+                    onChange={(event) => onManualFormChange({ ...manualForm, inputTokens: event.target.value })}
+                  />
+                </label>
+                <label className="stacked-field">
+                  <span>Output tokens</span>
+                  <input
+                    inputMode="numeric"
+                    value={manualForm.outputTokens}
+                    onChange={(event) => onManualFormChange({ ...manualForm, outputTokens: event.target.value })}
+                  />
+                </label>
+                <label className="stacked-field">
+                  <span>Spend</span>
+                  <input
+                    inputMode="decimal"
+                    value={manualForm.totalCost}
+                    onChange={(event) => onManualFormChange({ ...manualForm, totalCost: event.target.value })}
+                  />
+                </label>
+                <button className="submit-button" type="button" onClick={onSubmitManual} disabled={busy}>
+                  <Link2 size={16} aria-hidden="true" />
+                  Submit Manual
+                </button>
+              </div>
+            ) : null}
+
+            <div className="connection-list">
+              {auth.connections.map((connection) => (
+                <span className={`connection-chip ${connection.status}`} key={connection.id}>
+                  {providerLabels[connection.provider]} · {connection.authMethod}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+
+        {connectionMessage ? (
+          <span className={`dialog-message ${connectionState}`} role="status">
+            {connectionMessage}
+          </span>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function SegmentedControl({
   ariaLabel,
   items,
@@ -363,21 +843,41 @@ function Metric({
 }
 
 function ProviderBar({ large = false, row }: { large?: boolean; row: LeaderboardRow }) {
-  const total = Math.max(1, row.providers.codex + row.providers.claude + row.providers.other);
-  const codex = (row.providers.codex / total) * 100;
-  const claude = (row.providers.claude / total) * 100;
-  const other = Math.max(0, 100 - codex - claude);
+  const total = Math.max(1, usageProviders.reduce((sum, item) => sum + row.providers[item], 0));
+  const segments = usageProviders
+    .map((item) => ({
+      provider: item,
+      label: providerLabels[item],
+      tokens: row.providers[item],
+      percent: (row.providers[item] / total) * 100
+    }))
+    .filter((item) => item.tokens > 0);
 
   return (
     <div className={large ? "provider-mix large" : "provider-mix"}>
       <div className="mix-track" aria-hidden="true">
-        <span className="codex" style={{ width: `${codex}%` }} />
-        <span className="claude" style={{ width: `${claude}%` }} />
-        <span className="other" style={{ width: `${other}%` }} />
+        {segments.length ? (
+          segments.map((segment) => (
+            <span
+              key={segment.provider}
+              style={{
+                width: `${segment.percent}%`,
+                background: providerColors[segment.provider]
+              }}
+            />
+          ))
+        ) : (
+          <span style={{ width: "100%", background: providerColors.other }} />
+        )}
       </div>
       <div className="mix-labels">
-        <span>Codex {Math.round(codex)}%</span>
-        <span>Claude {Math.round(claude)}%</span>
+        {(segments.length ? segments : [{ label: "Other", percent: 100, provider: "other" as const, tokens: 0 }])
+          .slice(0, 3)
+          .map((segment) => (
+            <span key={segment.provider}>
+              {segment.label} {Math.round(segment.percent)}%
+            </span>
+          ))}
       </div>
     </div>
   );

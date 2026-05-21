@@ -37,11 +37,36 @@ If `TOKENMAXING_INGEST_TOKEN` is set on the server, the collector sends it as a 
 
 ## API
 
-- `GET /api/leaderboard?window=today|7d|30d|all&provider=all|codex|claude&team=all&query=`
+- `GET /api/leaderboard?window=today|7d|30d|all&provider=all|codex|openai|xai|claude|other&team=all&query=`
 - `POST /api/usage/ingest`
+- `POST /api/usage/manual`
+- `POST /api/providers/openai/sync`
+- `POST /api/providers/xai/sync`
+- `GET /api/auth/session`
+- `POST /api/auth/login`
 - `GET /api/users/me`
 
 Local ingests are stored in `data/usage-samples.jsonl`. Repeated submissions replace the latest snapshot for that user/provider so refreshes do not double-count. The app also includes seeded demo rows so the leaderboard is usable before the first real collector sync.
+
+## Sign In And Provider Sync
+
+The app now has a **Connect** flow for users who do not have CodexBar.
+
+- Local profile login works without external config.
+- GitHub OAuth login is enabled when `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are set.
+- OpenAI sync uses the official organization usage and costs APIs with an Admin API key.
+- xAI sync uses the xAI Management billing invoice API with a management key and team ID.
+- Manual submit is available for providers that expose usage in dashboards but not yet in a supported API shape.
+
+Provider keys are used for the sync request and are not written to `data/`.
+
+Optional auth settings:
+
+```bash
+TOKENMAXING_SESSION_SECRET=long-random-string
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+```
 
 ## Production
 
